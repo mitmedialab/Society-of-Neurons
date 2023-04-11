@@ -1,0 +1,2 @@
+- Binary classification task number VS text came from Pat
+- Summarization task came from https://huggingface.co/datasets/jordiclive/wikipedia-summary-dataset
