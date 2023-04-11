@@ -28,6 +28,9 @@
 #define ANSI_COLOR_RESET   "\x1b[0m"
 #define ANSI_BOLD          "\x1b[1m"
 
+// make a string variable called task
+std::string task = "classify_activations.txt";
+
 // determine number of model parts based on the dimension
 static const std::map<int, int> LLAMA_N_PARTS = {
     { 4096, 1 },
@@ -86,6 +89,7 @@ struct llama_model {
     std::map<std::string, struct ggml_tensor *> tensors;
 };
 
+
 // load the model's weights from a file
 bool llama_model_load(const std::string & fname, llama_model & model, gpt_vocab & vocab, int n_ctx) {
     fprintf(stderr, "%s: loading model from '%s' - please wait ...\n", __func__, fname.c_str());
@@ -130,16 +134,16 @@ bool llama_model_load(const std::string & fname, llama_model & model, gpt_vocab 
         n_ff = ((2*(4*hparams.n_embd)/3 + hparams.n_mult - 1)/hparams.n_mult)*hparams.n_mult;
         n_parts = LLAMA_N_PARTS.at(hparams.n_embd);
 
-        // fprintf(stderr, "%s: n_vocab = %d\n", __func__, hparams.n_vocab);
-        // fprintf(stderr, "%s: n_ctx   = %d\n", __func__, hparams.n_ctx);
-        // fprintf(stderr, "%s: n_embd  = %d\n", __func__, hparams.n_embd);
-        // fprintf(stderr, "%s: n_mult  = %d\n", __func__, hparams.n_mult);
-        // fprintf(stderr, "%s: n_head  = %d\n", __func__, hparams.n_head);
-        // fprintf(stderr, "%s: n_layer = %d\n", __func__, hparams.n_layer);
-        // fprintf(stderr, "%s: n_rot   = %d\n", __func__, hparams.n_rot);
-        // fprintf(stderr, "%s: f16     = %d\n", __func__, hparams.f16);
-        // fprintf(stderr, "%s: n_ff    = %d\n", __func__, n_ff);
-        // fprintf(stderr, "%s: n_parts = %d\n", __func__, n_parts);
+        fprintf(stderr, "%s: n_vocab = %d\n", __func__, hparams.n_vocab);
+        fprintf(stderr, "%s: n_ctx   = %d\n", __func__, hparams.n_ctx);
+        fprintf(stderr, "%s: n_embd  = %d\n", __func__, hparams.n_embd);
+        fprintf(stderr, "%s: n_mult  = %d\n", __func__, hparams.n_mult);
+        fprintf(stderr, "%s: n_head  = %d\n", __func__, hparams.n_head);
+        fprintf(stderr, "%s: n_layer = %d\n", __func__, hparams.n_layer);
+        fprintf(stderr, "%s: n_rot   = %d\n", __func__, hparams.n_rot);
+        fprintf(stderr, "%s: f16     = %d\n", __func__, hparams.f16);
+        fprintf(stderr, "%s: n_ff    = %d\n", __func__, n_ff);
+        fprintf(stderr, "%s: n_parts = %d\n", __func__, n_parts);
     }
 
     // load vocab
@@ -163,9 +167,9 @@ bool llama_model_load(const std::string & fname, llama_model & model, gpt_vocab 
             vocab.token_to_id[word] = i;
             vocab.id_to_token[i] = word;
 
-            //if (i < 30000) {
+            // if (i < 30000) {
             //    fprintf(stderr, "%s: vocab[%d] = '%s'\n", __func__, i, word.c_str());
-            //}
+            // }
         }
     }
 
@@ -603,8 +607,10 @@ bool llama_eval(
             struct ggml_tensor * Kcur = ggml_mul_mat(ctx0, model.layers[il].wk, cur);
             struct ggml_tensor * Vcur = ggml_mul_mat(ctx0, model.layers[il].wv, cur);
 
-            // store key and value to memory
-            if (N >= 1) {
+
+                // store key and value to memory
+                if (N >= 1)
+            {
                 struct ggml_tensor * k = ggml_view_1d(ctx0, model.memory_k, N*n_embd, (ggml_element_size(model.memory_k)*n_embd)*(il*n_ctx + n_past));
                 struct ggml_tensor * v = ggml_view_1d(ctx0, model.memory_v, N*n_embd, (ggml_element_size(model.memory_v)*n_embd)*(il*n_ctx + n_past));
 
@@ -710,6 +716,25 @@ bool llama_eval(
 
         // input for next layer
         inpL = cur;
+        
+        // cast inpL data to float pointer
+        float *inpL_data = (float *)ggml_get_data(inpL);
+        // fprintf(stderr, "%f\n", inpL_data[0]);
+        int *inpL_size = (int *)inpL->ne;
+        // fprintf(stderr, "%d\n", *inpL_size);
+
+        // write the first inpL size elements in inpL_data to a file called activations.txt
+        FILE *fp = fopen(task.c_str(), "a");
+        // write the layer index into the file
+        fprintf(fp, "Layer %d\n", il);
+        for (int i = 0; i < *inpL_size; i++)
+        {
+            fprintf(fp, "%f, ", inpL_data[i]);
+        }
+        fprintf(fp, "\n");
+
+        // write a new line in the file
+        fclose(fp);
     }
 
     // norm
@@ -734,10 +759,10 @@ bool llama_eval(
     ggml_build_forward_expand(&gf, inpL);
     ggml_graph_compute       (ctx0, &gf);
 
-    //if (n_past%100 == 0) {
+    if (n_past%100 == 0) {
     //    ggml_graph_print   (&gf);
     //    ggml_graph_dump_dot(&gf, NULL, "gpt-2.dot");
-    //}
+    }
 
     //embd_w.resize(n_vocab*N);
     //memcpy(embd_w.data(), ggml_get_data(inpL), sizeof(float)*n_vocab*N);
@@ -983,6 +1008,14 @@ int main(int argc, char ** argv) {
 
                 t_sample_us += ggml_time_us() - t_start_sample_us;
             }
+
+            // write id to activations.txt file
+
+            // write the first inpL size elements in inpL_data to a file called activations.txt
+            FILE *fp = fopen(task.c_str(), "a");
+            fprintf(fp, "Token: %s", vocab.id_to_token[id].c_str());
+            fprintf(fp, "\n");
+            fclose(fp);
 
             // add it to the context
             embd.push_back(id);
