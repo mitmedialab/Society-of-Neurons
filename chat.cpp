@@ -29,7 +29,7 @@
 #define ANSI_BOLD          "\x1b[1m"
 
 // make a string variable called task
-std::string task = "classify_activations.txt";
+std::string task = "media_lab_activations.txt";
 
 // determine number of model parts based on the dimension
 static const std::map<int, int> LLAMA_N_PARTS = {
@@ -817,12 +817,24 @@ const char * llama_print_system_info(void) {
 }
 
 int main(int argc, char ** argv) {
+    if (argc > 1)
+    {
+        // Print the first argument
+        task = argv[1];
+        task += "_activations.txt";
+    }
+    else
+    {
+        fprintf(stderr, "Enter the task name to store the activations");
+        return 0;
+    }
+
     ggml_time_init();
     const int64_t t_main_start_us = ggml_time_us();
 
     gpt_params params;
 
-    if (gpt_params_parse(argc, argv, params) == false) {
+    if (gpt_params_parse(argc-1, argv+sizeof(char), params) == false) {
         return 1;
     }
 
