@@ -29,7 +29,7 @@ question_id is the unique identifier across the whole project
 - load_llm: load an llm for evaluation
     - input → model_paths
     - output → model instance
-- generate_outputs: takes a set of questions and generates llm outputs, can do knockout
+- generate_outputs_batch: takes a set of questions and generates llm outputs, can do knockout
     - input → set of questions, llm, optional cluster npy file, activation dir
     - output → activations, save to activation_dir
 - process_activations: load activation dir using aggregation strategy (first/avg/last) and save the df
@@ -82,11 +82,16 @@ def generate_output(input_prompt, tokenizer, model, knockout_neurons):
 
 ### Response:"""
 
+    print("Prompt:", input_prompt)
+
     generation_config = GenerationConfig(
             temperature=0,
             top_p=1,
             num_beams=1, # beam search
             )
+
+    if knockout_neurons is not None:
+        print("Knocking out neurons")
 
     inputs = tokenizer(prompt, return_tensors="pt")
     input_ids = inputs["input_ids"].cuda()
@@ -98,6 +103,7 @@ def generate_output(input_prompt, tokenizer, model, knockout_neurons):
         max_new_tokens=256,
         output_hidden_states=True,
         knockout_neurons = knockout_neurons,
+        ns_value=1.0
     )
 
     for s in generation_output.sequences:
@@ -120,7 +126,7 @@ def generate_outputs_batch(csv_files, tokenizer, model, knockout_cluster=None, a
     for c in csv_files:
         data = pd.read_csv(c)
         selected_columns = data[['Question_ID', 'Question', 'Question_Type']]
-        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()])
+        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:10])
 
     print(f"Loaded {len(set_of_questions)} set of questions")
 
@@ -152,7 +158,7 @@ def generate_outputs_batch(csv_files, tokenizer, model, knockout_cluster=None, a
 
             # del output_to_save.sequences
 
-            save_path = opj(activations_dir, f"/{q_id}.pt")
+            save_path = opj(activations_dir, f"{q_id}.pt")
             torch.save(output_to_save, save_path)
     print("Processed all questions")
     
@@ -169,7 +175,8 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
     for c in csv_files:
         data = pd.read_csv(c)
         selected_columns = data[['Question_ID', 'Question', 'Question_Type']]
-        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()])
+        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:10])
+    
 
     print(f"Loaded {len(set_of_questions)} set of questions")
 
@@ -189,6 +196,7 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
                         activations.extend(token_activations_np)
 
         elif aggr_strategy == "avg":
+            activations = []
             token_hidden_states = hidden_states[3:]
             avg_activations = None
             for t in token_hidden_states:
@@ -197,8 +205,8 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
                         token_activations_np = token_activations.numpy()
                         activations.extend(token_activations_np)
 
-                if avg_activations:
-                    avg_activations+=(token_activations_np)
+                if avg_activations is not None:
+                    avg_activations += np.array(activations)
                 else:
                     avg_activations = np.array(activations)
 
@@ -228,7 +236,7 @@ def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs
     kmeans.fit(activations_df)
     pred = kmeans.predict(activations_df)
 
-    for c_id in n_clusters:
+    for c_id in range(n_clusters):
         cluster = []
         for e, p in enumerate(pred):
             if p == c_id:
@@ -236,7 +244,7 @@ def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs
 
         cluster_save_path = opj(clusters_dir, f"{c_id}")
         np.save(cluster_save_path, cluster)
-        print(f"Saved cluster {c_id} to {cluster_save_path}")
+        print(f"Saved cluster of {len(cluster)} neurons with id {c_id} to {cluster_save_path}")
 
 
 def cluster_activations_pca(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120):
