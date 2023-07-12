@@ -105,7 +105,7 @@ def generate_output(input_prompt, tokenizer, model, knockout_neurons):
         max_new_tokens=256,
         output_hidden_states=True,
         knockout_neurons = knockout_neurons,
-        ns_value=1.0
+        ns_value=0.0
     )
 
     for s in generation_output.sequences:
