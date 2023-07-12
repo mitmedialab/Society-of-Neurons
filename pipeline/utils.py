@@ -49,6 +49,8 @@ from tqdm import tqdm
 from peft import PeftModel
 from transformers import LlamaTokenizer, LlamaForCausalLM, GenerationConfig
 from sklearn.cluster import KMeans
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 opj = os.path.join
 
@@ -126,7 +128,7 @@ def generate_outputs_batch(csv_files, tokenizer, model, knockout_cluster=None, a
     for c in csv_files:
         data = pd.read_csv(c)
         selected_columns = data[['Question_ID', 'Question', 'Question_Type']]
-        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:10])
+        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:50])
 
     print(f"Loaded {len(set_of_questions)} set of questions")
 
@@ -175,7 +177,7 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
     for c in csv_files:
         data = pd.read_csv(c)
         selected_columns = data[['Question_ID', 'Question', 'Question_Type']]
-        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:10])
+        set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:50])
     
 
     print(f"Loaded {len(set_of_questions)} set of questions")
@@ -196,10 +198,10 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
                         activations.extend(token_activations_np)
 
         elif aggr_strategy == "avg":
-            activations = []
             token_hidden_states = hidden_states[3:]
             avg_activations = None
             for t in token_hidden_states:
+                activations = []
                 for layers in t:
                     for token_activations in layers[0]: # single beam search
                         token_activations_np = token_activations.numpy()
@@ -210,16 +212,16 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
                 else:
                     avg_activations = np.array(activations)
 
-            activations = np.mean(avg_activations, axis=0)
+            activations = avg_activations / len(token_hidden_states)
 
         activations_df[q_id] = activations
 
     activations_df_save_path = opj(activation_dir, f'activations_{aggr_strategy}.csv')
-    activations_df.to_csv(activations_df_save_path)
+    activations_df.to_csv(activations_df_save_path, index=False)
     print(f"Saved activations df to {activations_df_save_path}")
 
 
-def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120):
+def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120, calculate_significance=False):
     """
     load activations df and do clustering, analyze and save them, append _kmeans or _pca for the method, 
     optionally calculate r2 score to rank clusters
@@ -240,11 +242,34 @@ def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs
         cluster = []
         for e, p in enumerate(pred):
             if p == c_id:
-                cluster.append((e//hidden_size, e%hidden_size))
+                cluster.append((e//hidden_size-1, e%hidden_size))
 
         cluster_save_path = opj(clusters_dir, f"{c_id}")
         np.save(cluster_save_path, cluster)
-        print(f"Saved cluster of {len(cluster)} neurons with id {c_id} to {cluster_save_path}")
+        print(f"Saved cluster of {len(cluster)} neurons with id {c_id} to {cluster_save_path}.npy")
+
+        if calculate_significance:
+        
+            cluster_indices = [i[0]*hidden_size+i[1] for i in cluster]
+            if len(cluster_indices) == 0:
+                continue
+
+            cluster_activations = activations_df.iloc[cluster_indices].T
+
+            task_labels = np.array([0]*(activations_df.shape[1]//2) + [1]*(activations_df.shape[1]//2))
+
+            #convert cluster_activations to numpy array
+            cluster_activations = cluster_activations.to_numpy()
+
+            # do linear regression
+            lr = LinearRegression()
+            lr.fit(cluster_activations, task_labels)
+            
+            pred_r2 = lr.predict(cluster_activations)
+            
+            r2_score_value = r2_score(pred_r2, task_labels)
+
+            print(f"R2 score of cluster {c_id} is {r2_score_value}")
 
 
 def cluster_activations_pca(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120):
