@@ -51,6 +51,7 @@ from transformers import LlamaTokenizer, LlamaForCausalLM, GenerationConfig
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
+from sklearn.decomposition import PCA
 
 opj = os.path.join
 
@@ -272,13 +273,63 @@ def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs
             print(f"R2 score of cluster {c_id} is {r2_score_value}")
 
 
-def cluster_activations_pca(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120):
+def cluster_activations_pca(activations_df_file, clusters_dir, percentile=95, cluster_kwargs={}, hidden_size=5120, calculate_significance=False):
     """
-    load activations df and do clustering, analyze and save them, append _kmeans or _pca for the method, 
+    load activations df and do PCA, analyze and save them, append _pca for the method, 
     optionally calculate r2 score to rank clusters
     """
-    pass
 
+    activations_df = pd.read_csv(activations_df_file)
+
+    if 'n_components' in cluster_kwargs.keys():
+        n_components = cluster_kwargs['n_components']
+    else:
+        n_components = 14
+
+    pca = PCA(**cluster_kwargs)
+    pca.fit(activations_df)
+    components = pca.transform(activations_df)
+
+    # Iterate through each principal component
+    for c_id in range(n_components):
+        component = []
+
+        # threshold for determining if neuron significantly contributes to the component
+        threshold = np.percentile(np.abs(components[:, c_id]), percentile)
+
+        # Iterate over each element in the current principal component
+        for e, p in enumerate(components[:, c_id]):
+            if abs(p) >= threshold:
+                component.append((e//hidden_size-1, e%hidden_size))
+
+        component_save_path = os.path.join(clusters_dir, f"{c_id}")
+        np.save(component_save_path, component)
+        print(f"Saved component of {len(component)} neurons with id {c_id} to {component_save_path}.npy")
+
+        if calculate_significance:
+        
+            # Get the indices of the significant neurons
+            component_indices = [i[0]*hidden_size+i[1] for i in component]
+            
+            # If there are no significant neurons, continue to the next component
+            if len(component_indices) == 0:
+                continue
+
+            component_activations = activations_df.iloc[component_indices].T
+
+            task_labels = np.array([0]*(activations_df.shape[1]//2) + [1]*(activations_df.shape[1]//2))
+
+            component_activations = component_activations.to_numpy()
+
+            # linear regression
+            lr = LinearRegression()
+            lr.fit(component_activations, task_labels)
+            
+            pred_r2 = lr.predict(component_activations)
+            
+            r2_score_value = r2_score(pred_r2, task_labels)
+
+            print(f"R2 score of component {c_id} is {r2_score_value}")
 
 def visualize_activations(q_id, activation_dir):
     pass
