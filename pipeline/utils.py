@@ -40,7 +40,7 @@ question_id is the unique identifier across the whole project
     - output → cluster npy files saved
 '''
 
-import os 
+import os
 import torch
 import pandas as pd
 import numpy as np
@@ -52,14 +52,18 @@ from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
+from matplotlib.animation import FuncAnimation
+import matplotlib
 
 opj = os.path.join
 
-def load_llm(base_model_path, finetune_model_path):
 
+def load_llm(base_model_path, finetune_model_path):
     tokenizer = LlamaTokenizer.from_pretrained(base_model_path)
     print("Loaded tokenizer")
-    
+
     model = LlamaForCausalLM.from_pretrained(
         base_model_path,
         load_in_8bit=True,
@@ -88,10 +92,10 @@ def generate_output(input_prompt, tokenizer, model, knockout_neurons):
     print("Prompt:", input_prompt)
 
     generation_config = GenerationConfig(
-            temperature=0,
-            top_p=1,
-            num_beams=1, # beam search
-            )
+        temperature=0,
+        top_p=1,
+        num_beams=1,  # beam search
+    )
 
     if knockout_neurons is not None:
         print("Knocking out neurons")
@@ -105,7 +109,7 @@ def generate_output(input_prompt, tokenizer, model, knockout_neurons):
         output_scores=True,
         max_new_tokens=256,
         output_hidden_states=True,
-        knockout_neurons = knockout_neurons,
+        knockout_neurons=knockout_neurons,
         ns_value=0.0
     )
 
@@ -164,13 +168,13 @@ def generate_outputs_batch(csv_files, tokenizer, model, knockout_cluster=None, a
             save_path = opj(activations_dir, f"{q_id}.pt")
             torch.save(output_to_save, save_path)
     print("Processed all questions")
-    
+
 
 def process_activations(csv_files, activation_dir, aggr_strategy='first'):
     """
     load activation dir using aggregation strategy (first/avg/last) and save the df in format of q_idxneuron_id
     """
-    
+
     if type(csv_files) == str:
         csv_files = [csv_files]
 
@@ -179,13 +183,12 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
         data = pd.read_csv(c)
         selected_columns = data[['Question_ID', 'Question', 'Question_Type']]
         set_of_questions.extend([tuple(x) for x in selected_columns.to_numpy()][:50])
-    
 
     print(f"Loaded {len(set_of_questions)} set of questions")
 
     activations_df = pd.DataFrame()
-    
-    for q_id, _,  _ in tqdm(set_of_questions):
+
+    for q_id, _, _ in tqdm(set_of_questions):
         activation_file = opj(activation_dir, f"{q_id}.pt")
         output_data = torch.load(activation_file, map_location=torch.device('cpu'))
         hidden_states = output_data['hidden_states']
@@ -194,9 +197,9 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
             activations = []
             token_hidden_states = hidden_states[3]
             for layers in token_hidden_states:
-                    for token_activations in layers[0]: # single beam search
-                        token_activations_np = token_activations.numpy()
-                        activations.extend(token_activations_np)
+                for token_activations in layers[0]:  # single beam search
+                    token_activations_np = token_activations.numpy()
+                    activations.extend(token_activations_np)
 
         elif aggr_strategy == "avg":
             token_hidden_states = hidden_states[3:]
@@ -204,7 +207,7 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
             for t in token_hidden_states:
                 activations = []
                 for layers in t:
-                    for token_activations in layers[0]: # single beam search
+                    for token_activations in layers[0]:  # single beam search
                         token_activations_np = token_activations.numpy()
                         activations.extend(token_activations_np)
 
@@ -222,7 +225,8 @@ def process_activations(csv_files, activation_dir, aggr_strategy='first'):
     print(f"Saved activations df to {activations_df_save_path}")
 
 
-def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120, calculate_significance=False):
+def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs={}, hidden_size=5120,
+                               calculate_significance=False):
     """
     load activations df and do clustering, analyze and save them, append _kmeans or _pca for the method, 
     optionally calculate r2 score to rank clusters
@@ -243,37 +247,38 @@ def cluster_activations_kmeans(activations_df_file, clusters_dir, cluster_kwargs
         cluster = []
         for e, p in enumerate(pred):
             if p == c_id:
-                cluster.append((e//hidden_size-1, e%hidden_size))
+                cluster.append((e // hidden_size - 1, e % hidden_size))
 
         cluster_save_path = opj(clusters_dir, f"{c_id}")
         np.save(cluster_save_path, cluster)
         print(f"Saved cluster of {len(cluster)} neurons with id {c_id} to {cluster_save_path}.npy")
 
         if calculate_significance:
-        
-            cluster_indices = [i[0]*hidden_size+i[1] for i in cluster]
+
+            cluster_indices = [i[0] * hidden_size + i[1] for i in cluster]
             if len(cluster_indices) == 0:
                 continue
 
             cluster_activations = activations_df.iloc[cluster_indices].T
 
-            task_labels = np.array([0]*(activations_df.shape[1]//2) + [1]*(activations_df.shape[1]//2))
+            task_labels = np.array([0] * (activations_df.shape[1] // 2) + [1] * (activations_df.shape[1] // 2))
 
-            #convert cluster_activations to numpy array
+            # convert cluster_activations to numpy array
             cluster_activations = cluster_activations.to_numpy()
 
             # do linear regression
             lr = LinearRegression()
             lr.fit(cluster_activations, task_labels)
-            
+
             pred_r2 = lr.predict(cluster_activations)
-            
+
             r2_score_value = r2_score(pred_r2, task_labels)
 
             print(f"R2 score of cluster {c_id} is {r2_score_value}")
 
 
-def cluster_activations_pca(activations_df_file, clusters_dir, percentile=95, cluster_kwargs={}, hidden_size=5120, calculate_significance=False):
+def cluster_activations_pca(activations_df_file, clusters_dir, percentile=95, cluster_kwargs={}, hidden_size=5120,
+                            calculate_significance=False):
     """
     load activations df and do PCA, analyze and save them, append _pca for the method, 
     optionally calculate r2 score to rank clusters
@@ -300,36 +305,91 @@ def cluster_activations_pca(activations_df_file, clusters_dir, percentile=95, cl
         # Iterate over each element in the current principal component
         for e, p in enumerate(components[:, c_id]):
             if abs(p) >= threshold:
-                component.append((e//hidden_size-1, e%hidden_size))
+                component.append((e // hidden_size - 1, e % hidden_size))
 
         component_save_path = os.path.join(clusters_dir, f"{c_id}")
         np.save(component_save_path, component)
         print(f"Saved component of {len(component)} neurons with id {c_id} to {component_save_path}.npy")
 
         if calculate_significance:
-        
+
             # Get the indices of the significant neurons
-            component_indices = [i[0]*hidden_size+i[1] for i in component]
-            
+            component_indices = [i[0] * hidden_size + i[1] for i in component]
+
             # If there are no significant neurons, continue to the next component
             if len(component_indices) == 0:
                 continue
 
             component_activations = activations_df.iloc[component_indices].T
 
-            task_labels = np.array([0]*(activations_df.shape[1]//2) + [1]*(activations_df.shape[1]//2))
+            task_labels = np.array([0] * (activations_df.shape[1] // 2) + [1] * (activations_df.shape[1] // 2))
 
             component_activations = component_activations.to_numpy()
 
             # linear regression
             lr = LinearRegression()
             lr.fit(component_activations, task_labels)
-            
+
             pred_r2 = lr.predict(component_activations)
-            
+
             r2_score_value = r2_score(pred_r2, task_labels)
 
             print(f"R2 score of component {c_id} is {r2_score_value}")
 
-def visualize_activations(q_id, activation_dir):
-    pass
+
+def visualize_activations(input_prompt, activation_dir="/content/drive/MyDrive/llm/activations/",
+                          output_dir="/content/drive/MyDrive/llm/visualizations/"):
+    input_prompt = input_prompt.replace(' ', '_')
+    filepath = activation_dir + input_prompt + ".pt"
+
+    # Load the .pt file
+    data = torch.load(filepath)
+
+    hidden_states = data['hidden_states']
+    output_response = data['output'].split("Response:")[1]
+
+    all_images = []
+    vmin = 0
+    vmax = 0
+
+    for token_id, token_hidden_states in tqdm(enumerate(hidden_states)):
+        if token_id > 0:
+            activations = []
+
+            for layer_id, layers in enumerate(token_hidden_states):
+                for beam_id, beams in enumerate(layers):
+                    for token_activation_id, token_activations in enumerate(beams):
+                        token_activations_np = token_activations.cpu().numpy()
+                        activations.extend(token_activations_np)
+
+            image_size = int(np.ceil(np.sqrt(len(activations))))
+            img = np.zeros((image_size, image_size), dtype=np.uint8)
+            img.flat[:len(activations)] = activations
+            all_images.append(img)
+
+            vmin_token = np.min(activations)
+            if vmin_token < vmin:
+                vmin = vmin_token
+            vmax_token = np.max(activations)
+            if vmax_token > vmax:
+                vmax = vmax_token
+
+    log_norm = LogNorm(vmin=vmin, vmax=vmax)
+
+    matplotlib.use("Agg")
+
+    def update(frame):
+        plt.clf()
+        plt.imshow(all_images[frame], cmap='viridis', norm=log_norm)
+        plt.title(f"Token {frame + 1}: {output_response[frame]}", fontsize=30)
+        plt.axis('off')
+
+    fig = plt.figure(figsize=(20, 20))
+    ani = FuncAnimation(fig, update, frames=len(all_images), interval=500)
+
+    output_path = output_dir + input_prompt + ".mp4"
+    ani.save(output_path, dpi=100, writer="ffmpeg")
+
+    matplotlib.use("module://ipykernel.pylab.backend_inline")
+
+    print("visualization succesfully saved: '" + str(output_path) + "'")

@@ -498,9 +498,7 @@ class LlamaModel(LlamaPreTrainedModel):
 
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states)
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -556,7 +554,7 @@ class LlamaModel(LlamaPreTrainedModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = () if use_cache else None
 
-
+##############
         knockout_neurons_dict = defaultdict(list)
         if knockout_neurons is not None:
             for layer_id, embedding_id in knockout_neurons:
@@ -566,7 +564,7 @@ class LlamaModel(LlamaPreTrainedModel):
             # knockout operation
             if idx in knockout_neurons_dict:
                 hidden_states[:, knockout_neurons_dict[idx]] = 0 #The output of a neuron is set to zero if its id is included in the list of neurons to knock out for the current layer.
-
+##############
 
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
