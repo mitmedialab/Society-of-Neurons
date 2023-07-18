@@ -337,6 +337,7 @@ def cluster_activations_pca(activations_df_file, clusters_dir, percentile=95, cl
             print(f"R2 score of component {c_id} is {r2_score_value}")
 
 
+
 def generate_bitmap_animation(input_prompt, activation_dir="/content/drive/MyDrive/llm/activations/",
                               output_dir="/content/drive/MyDrive/llm/visualizations/"):
     input_prompt = input_prompt.replace(' ', '_')
@@ -346,6 +347,7 @@ def generate_bitmap_animation(input_prompt, activation_dir="/content/drive/MyDri
     data = torch.load(filepath)
 
     hidden_states = data['hidden_states']
+    output_response = data['output'].split("Response:")[1]
 
     all_images = []
     vmin = 0
@@ -379,8 +381,10 @@ def generate_bitmap_animation(input_prompt, activation_dir="/content/drive/MyDri
     def update(frame):
         plt.clf()
         plt.imshow(all_images[frame], cmap='viridis', norm=log_norm)
-        plt.title(f"Prompt: {input_prompt.replace('_', ' ')}, Token {frame + 1}", fontsize=30)
+        plt.title(f"Prompt: {input_prompt.replace('_', ' ')}, \nToken {frame + 1} Output Token: {output_response[frame]}", fontsize=30)
+
         plt.axis('off')
+
 
     fig = plt.figure(figsize=(20, 20))
     ani = FuncAnimation(fig, update, frames=len(all_images), interval=400)
@@ -391,3 +395,4 @@ def generate_bitmap_animation(input_prompt, activation_dir="/content/drive/MyDri
     matplotlib.use("module://ipykernel.pylab.backend_inline")
 
     print("visualization succesfully saved: '" + str(output_path) + "'")
+    
