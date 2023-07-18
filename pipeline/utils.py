@@ -337,8 +337,8 @@ def cluster_activations_pca(activations_df_file, clusters_dir, percentile=95, cl
             print(f"R2 score of component {c_id} is {r2_score_value}")
 
 
-def visualize_activations(input_prompt, activation_dir="/content/drive/MyDrive/llm/activations/",
-                          output_dir="/content/drive/MyDrive/llm/visualizations/"):
+def generate_bitmap_animation(input_prompt, activation_dir="/content/drive/MyDrive/llm/activations/",
+                              output_dir="/content/drive/MyDrive/llm/visualizations/"):
     input_prompt = input_prompt.replace(' ', '_')
     filepath = activation_dir + input_prompt + ".pt"
 
@@ -346,7 +346,6 @@ def visualize_activations(input_prompt, activation_dir="/content/drive/MyDrive/l
     data = torch.load(filepath)
 
     hidden_states = data['hidden_states']
-    output_response = data['output'].split("Response:")[1]
 
     all_images = []
     vmin = 0
@@ -355,7 +354,6 @@ def visualize_activations(input_prompt, activation_dir="/content/drive/MyDrive/l
     for token_id, token_hidden_states in tqdm(enumerate(hidden_states)):
         if token_id > 0:
             activations = []
-
             for layer_id, layers in enumerate(token_hidden_states):
                 for beam_id, beams in enumerate(layers):
                     for token_activation_id, token_activations in enumerate(beams):
@@ -381,11 +379,11 @@ def visualize_activations(input_prompt, activation_dir="/content/drive/MyDrive/l
     def update(frame):
         plt.clf()
         plt.imshow(all_images[frame], cmap='viridis', norm=log_norm)
-        plt.title(f"Token {frame + 1}: {output_response[frame]}", fontsize=30)
+        plt.title(f"Prompt: {input_prompt.replace('_', ' ')}, Token {frame + 1}", fontsize=30)
         plt.axis('off')
 
     fig = plt.figure(figsize=(20, 20))
-    ani = FuncAnimation(fig, update, frames=len(all_images), interval=500)
+    ani = FuncAnimation(fig, update, frames=len(all_images), interval=400)
 
     output_path = output_dir + input_prompt + ".mp4"
     ani.save(output_path, dpi=100, writer="ffmpeg")
